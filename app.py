@@ -1,131 +1,154 @@
 import streamlit as st
 import pandas as pd
-import math
-from datetime import datetime
-from urllib.parse import urlparse
 import feedparser
+from datetime import datetime
+import requests
 
-# ---- Local helpers ----------------------------------------------------------
-from rss_sources import rss_sources
-from news_analyzer import build_prompt, call_openrouter_api
+# Configuration
+st.set_page_config(page_title="📰 News Analyzer", page_icon="📰", layout="wide")
 
-# ---- Utility ----------------------------------------------------------------
-def fetch_rss(url: str, limit: int = 50) -> list[dict]:
-    feed = feedparser.parse(url)
-    entries = []
-    for e in feed.entries[:limit]:
-        # published → ISO-8601 fallback
-        pub = getattr(e, "published", getattr(e, "updated", ""))
-        try:
-            pub_iso = datetime.strptime(
-                pub, "%a, %d %b %Y %H:%M:%S %z"
-            ).strftime("%Y-%m-%d %H:%M")
-        except Exception:
-            pub_iso = pub
-        entries.append(
-            {
-                "title": e.get("title", "Untitled"),
-                "link": e.get("link", ""),
-                "summary": e.get("summary", "No summary available"),
-                "published": pub_iso,
-            }
-        )
-    return entries
+# RSS Sources
+RSS_SOURCES = {
+    "DeepMind Blog": "https://rss.app/feeds/dISWeyZM2Tzfmh7n.xml",
+    "NVIDIA Gen AI": "https://rss.app/feeds/sh5T3ziuw18ppMnJ.xml", 
+    "OpenAI News": "https://rss.app/feeds/88lTJ2E61JPFhtfy.xml",
+    "AWS ML Blog": "https://rss.app/feeds/IvbT7TcwbDQXkpio.xml",
+    "Perplexity AI": "https://rss.app/feeds/nZ4JF5xejzLVJXkA.xml"
+}
 
-def filter_by_keywords(entries, keywords):
-    if not keywords:
-        return entries
-    kw = [k.lower() for k in keywords]
-    out = []
-    for art in entries:
-        text = (art["title"] + " " + art["summary"]).lower()
-        if any(k in text for k in kw):
-            out.append(art)
-    return out
+def fetch_rss_articles(url, limit=20):
+    """Fetch articles from RSS feed"""
+    try:
+        feed = feedparser.parse(url)
+        articles = []
+        
+        for entry in feed.entries[:limit]:
+            # Handle published date
+            published = getattr(entry, 'published', getattr(entry, 'updated', 'Unknown'))
+            try:
+                pub_date = datetime.strptime(published, "%a, %d %b %Y %H:%M:%S %z").strftime("%Y-%m-%d %H:%M")
+            except:
+                pub_date = published
+            
+            articles.append({
+                'title': entry.get('title', 'No Title'),
+                'link': entry.get('link', ''),
+                'summary': entry.get('summary', 'No summary available'),
+                'published': pub_date
+            })
+        
+        return articles
+    except Exception as e:
+        st.error(f"Error fetching RSS: {str(e)}")
+        return []
 
-# ---- Streamlit UI -----------------------------------------------------------
-st.set_page_config("📰 Tech-News Dashboard", "📰", "wide")
-st.title("📰 Tech-News Dashboard")
+def analyze_article(article_url, article_title):
+    """Analyze article using OpenRouter API"""
+    try:
+        # Get credentials from Streamlit secrets
+        api_key = st.secrets["OPENROUTER_API_KEY"]
+        base_url = st.secrets["OPENROUTER_BASE_URL"]
+        model = st.secrets["OPENROUTER_MODEL"]
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        prompt = f"""
+        Analyze this technology news article and provide insights:
+        
+        Title: {article_title}
+        URL: {article_url}
+        
+        Please provide:
+        1. Key Points (3-5 bullet points)
+        2. Technology Impact
+        3. Market Implications
+        4. Summary (2-3 sentences)
+        """
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a technology news analyst. Provide clear, structured analysis of tech news articles."},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 1000
+        }
+        
+        response = requests.post(base_url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        return result['choices'][0]['message']['content']
+        
+    except Exception as e:
+        return f"Analysis failed: {str(e)}"
 
-# Sidebar ──────────────────────────────────────────────────────────────────────
+# Main App
+st.title("📰 Tech News Analyzer")
+st.markdown("Analyze the latest technology news with AI-powered insights")
+
+# Sidebar
 with st.sidebar:
-    st.header("RSS Source")
-    source_key = st.selectbox(
-        "Pick one source", options=list(rss_sources.keys()), format_func=lambda k: rss_sources[k][0]
-    )
-    max_articles = st.slider("Articles to fetch", 10, 100, 50, 10)
-    st.markdown("---")
+    st.header("Settings")
+    selected_source = st.selectbox("Choose News Source", list(RSS_SOURCES.keys()))
+    num_articles = st.slider("Number of Articles", 5, 30, 10)
+    
+    # Check credentials
+    try:
+        api_key = st.secrets["OPENROUTER_API_KEY"]
+        if api_key:
+            st.success("✅ API credentials loaded")
+        else:
+            st.error("❌ API key missing")
+    except:
+        st.error("❌ Secrets file not found")
 
-    st.header("Keyword Filter")
-    kw_input = st.text_area(
-        "Enter keywords (one per line)", height=120, placeholder="AI\nMachine Learning\nRobotics"
-    )
-    keywords = [k.strip() for k in kw_input.splitlines() if k.strip()]
+# Main content
+col1, col2 = st.columns([1, 1])
 
-# Fetch feed ───────────────────────────────────────────────────────────────────
-src_name, src_url = rss_sources[source_key]
-with st.spinner(f"Loading **{src_name}** …"):
-    articles = fetch_rss(src_url, max_articles)
+with col1:
+    st.subheader(f"📄 Latest from {selected_source}")
+    
+    # Fetch articles
+    if st.button("🔄 Fetch Articles"):
+        with st.spinner("Fetching articles..."):
+            rss_url = RSS_SOURCES[selected_source]
+            articles = fetch_rss_articles(rss_url, num_articles)
+            st.session_state['articles'] = articles
+    
+    # Display articles
+    if 'articles' in st.session_state:
+        for i, article in enumerate(st.session_state['articles']):
+            with st.expander(f"📰 {article['title'][:80]}..."):
+                st.write(f"**Published:** {article['published']}")
+                st.write(f"**Summary:** {article['summary'][:200]}...")
+                st.write(f"**Link:** {article['link']}")
+                
+                if st.button(f"🔍 Analyze This Article", key=f"analyze_{i}"):
+                    st.session_state['selected_article'] = article
 
-filt_articles = filter_by_keywords(articles, keywords)
-
-# Pagination ───────────────────────────────────────────────────────────────────
-PER_PAGE = 5
-total_pages = max(1, math.ceil(len(filt_articles) / PER_PAGE))
-page = st.number_input("Page", 1, total_pages, 1, key="page_selector")
-
-start, end = (page - 1) * PER_PAGE, page * PER_PAGE
-page_articles = filt_articles[start:end]
-
-st.subheader(f"{src_name} — {len(filt_articles)} article(s) found")
-
-# Selection state
-if "picked" not in st.session_state:
-    st.session_state.picked = None
-if "analysis" not in st.session_state:
-    st.session_state.analysis = None
-
-# Article cards ────────────────────────────────────────────────────────────────
-for idx, art in enumerate(page_articles, start=start):
-    st.markdown(f"### {art['title']}")
-    st.write(f"Published: {art['published']}")
-    st.write(art["summary"][:500] + ("…" if len(art["summary"]) > 500 else ""))
-    col_a, col_b = st.columns(2)
-    with col_a:
-        if st.button("Select", key=f"sel_{idx}"):
-            st.session_state.picked = art
-            st.session_state.analysis = None
-    with col_b:
-        st.markdown(f"[Read full article]({art['link']})")
-    st.markdown("---")
-
-# Navigation buttons
-col_prev, col_next = st.columns(2)
-with col_prev:
-    if st.button("◀ Previous") and page > 1:
-        st.session_state.page_selector -= 1
-with col_next:
-    if st.button("Next ▶") and page < total_pages:
-        st.session_state.page_selector += 1
-
-# Analyzer ─────────────────────────────────────────────────────────────────────
-if st.session_state.picked:
-    art = st.session_state.picked
-    st.info(f"Selected: **{art['title']}**")
-    if st.button("🔍 Analyze News"):
-        prompt = build_prompt(art["link"], art["published"])
-        st.code(prompt, language="markdown")
-        # call the LLM
-        result = call_openrouter_api(prompt)
-        st.session_state.analysis = result
-
-# Show LLM output
-if st.session_state.analysis:
-    if st.session_state.analysis["ok"]:
-        st.success("Analysis complete")
-        st.json(st.session_state.analysis["response"])
+with col2:
+    st.subheader("🤖 AI Analysis")
+    
+    if 'selected_article' in st.session_state:
+        article = st.session_state['selected_article']
+        st.write(f"**Analyzing:** {article['title']}")
+        
+        if st.button("🚀 Start Analysis"):
+            with st.spinner("Analyzing article..."):
+                analysis = analyze_article(article['link'], article['title'])
+                st.session_state['analysis'] = analysis
+        
+        # Display analysis
+        if 'analysis' in st.session_state:
+            st.markdown("### 📊 Analysis Results")
+            st.write(st.session_state['analysis'])
     else:
-        st.error(st.session_state.analysis["error"])
+        st.info("👈 Select an article from the left panel to analyze")
 
-st.caption("© 2025 Tech-News Dashboard")
-# ---- End of Streamlit UI -----------------------------------------------------
+# Footer
+st.markdown("---")
+st.caption("© 2025 Tech News Analyzer")
