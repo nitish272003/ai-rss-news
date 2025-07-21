@@ -2,9 +2,15 @@ import os
 import requests
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from .env
 load_dotenv()
 
+# Constants from environment or default fallback
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
+MODEL = os.getenv("OPENROUTER_MODEL", "perplexity/sonar-pro")
+API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# System instruction for AI
 SYSTEM_INSTR = (
     "You are a specialized AI assistant designed to analyze technology "
     "news articles with precision and depth. Your role is to transform raw "
@@ -13,6 +19,7 @@ SYSTEM_INSTR = (
     "movements, and industry trends."
 )
 
+# Prompt template
 TEMPLATE = """# Technology News Analysis Prompt Template
 
 ## System Instructions
@@ -30,16 +37,13 @@ Published Date: {published}
 {url}
 """
 
+# Builds the prompt from URL and published date
 def build_prompt(url: str, published: str) -> str:
     return TEMPLATE.format(system=SYSTEM_INSTR, published=published, url=url)
 
-# ---- OpenRouter Configuration ----
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
-MODEL = os.getenv("OPENROUTER_MODEL", "perplexity/sonar-pro")
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-
+# Calls the OpenRouter API with prompt
 def call_openrouter_api(prompt: str) -> dict:
-    if API_KEY is None:
+    if not API_KEY:
         return {"ok": False, "error": "OPENROUTER_API_KEY is missing in .env file"}
 
     headers = {
@@ -58,13 +62,9 @@ def call_openrouter_api(prompt: str) -> dict:
     }
 
     try:
-        resp = requests.post(BASE_URL, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
-        
-        # Safe JSON parsing
-        result = resp.json()
-        content = result['choices'][0]['message']['content']
-        return {"ok": True, "response": content}
-        
+        response = requests.post(BASE_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+        return {"ok": True, "response": data["choices"][0]["message"]["content"]}
     except Exception as e:
         return {"ok": False, "error": str(e)}
