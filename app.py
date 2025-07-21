@@ -1,12 +1,38 @@
 import streamlit as st
-import feedparser
 import pandas as pd
 from datetime import datetime
 import requests
 from urllib.parse import urlparse
 
-# Import your configuration
-from config import Config, rss_sources
+# Try to import feedparser with error handling
+try:
+    import feedparser
+    FEEDPARSER_AVAILABLE = True
+except ImportError:
+    FEEDPARSER_AVAILABLE = False
+
+# Import your configuration with error handling for missing secrets
+try:
+    from config import Config, rss_sources
+    CONFIG_AVAILABLE = True
+except (ImportError, KeyError) as e:
+    CONFIG_AVAILABLE = False
+    # Fallback RSS sources from your config
+    rss_sources = {
+        "1": ("DeepMind Blog", "https://rss.app/feeds/dISWeyZM2Tzfmh7n.xml"),
+        "2": ("NVIDIA Developer - Generative AI", "https://rss.app/feeds/sh5T3ziuw18ppMnJ.xml"),
+        "3": ("OpenAI News", "https://rss.app/feeds/88lTJ2E61JPFhtfy.xml"),
+        "4": ("AWS Machine Learning", "https://rss.app/feeds/IvbT7TcwbDQXkpio.xml"),
+        "5": ("Perplexity AI", "https://rss.app/feeds/nZ4JF5xejzLVJXkA.xml"),
+        "6": ("NVIDIA Robotics", "https://rss.app/feeds/fgok8MDwu6ZJCOl7.xml"),
+        "7": ("Anthropic", "https://rss.app/feeds/R87xeBq4tXiHLS3s.xml"),
+        "8": ("Microsoft", "https://rss.app/feeds/bQF9FLInBGQsYBi5.xml"),
+        "9": ("Baidu", "https://rss.app/feeds/04waQCQOmzu7kVhX.xml"),
+        "10": ("Meta AI Blog", "https://rss.app/feeds/9QDXU7Tl5VxHCNtv.xml"),
+        "11": ("Hugging Face", "https://rss.app/feeds/IkUVIFijmf7JEj9f.xml"),
+        "12": ("Boston Dynamics", "https://rss.app/feeds/aDP50odVFp6PJLj8.xml"),
+        "13": ("News MIT", "https://news.mit.edu/topic/mitartificial-intelligence2-rss.xml")
+    }
 
 def fetch_rss_feed(url, max_entries=5):
     """Fetch and parse RSS feed from URL"""
@@ -59,6 +85,59 @@ def main():
     )
     
     st.title("🔄 RSS Sources Dashboard")
+    
+    # Check for dependencies
+    if not FEEDPARSER_AVAILABLE:
+        st.error("📦 Missing Required Dependencies")
+        st.markdown("""
+        **The `feedparser` library is required to run this app.**
+        
+        Please install it using one of these methods:
+        
+        **Option 1: Using pip**
+        ```bash
+        pip install feedparser
+        ```
+        
+        **Option 2: Using requirements.txt**
+        Create a `requirements.txt` file with:
+        ```
+        streamlit
+        feedparser
+        pandas
+        requests
+        ```
+        Then run: `pip install -r requirements.txt`
+        
+        **Option 3: For Streamlit Cloud**
+        Make sure your `requirements.txt` includes `feedparser`
+        """)
+        st.stop()
+    
+    # Check for missing secrets/config (show warning but continue)
+    if not CONFIG_AVAILABLE:
+        st.warning("⚙️ Configuration Issue Detected")
+        st.markdown("""
+        **Your app is missing required secrets configuration.** The RSS sources will still work, but other features may be limited.
+        
+        **To fix this, add the following secrets:**
+        
+        1. Go to your Streamlit Cloud dashboard
+        2. Click on your app settings (gear icon)
+        3. Go to the "Secrets" section
+        4. Add the following in TOML format:
+        
+        ```toml
+        client_email = "your-service-account@eng-pulsar-466105-g5.iam.gserviceaccount.com"
+        private_key = '''-----BEGIN PRIVATE KEY-----
+        your-actual-private-key-content-here
+        -----END PRIVATE KEY-----'''
+        openrouter_api_key = "your-openrouter-api-key-here"
+        ```
+        
+        **For now, you can still browse RSS feeds below! 👇**
+        """)
+    
     st.markdown("---")
     
     # Sidebar for source selection
