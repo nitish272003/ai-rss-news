@@ -1,4 +1,4 @@
-import os
+import streamlit as st
 import requests
 
 SYSTEM_INSTR = (
@@ -9,49 +9,63 @@ SYSTEM_INSTR = (
     "movements, and industry trends."
 )
 
-TEMPLATE = """# Technology News Analysis Prompt Template
+TEMPLATE = """# Technology News Analysis
 
-## System Instructions
-{system}
+## Article Details
+URL: {url}
+Published: {published}
 
-## Required Output Format
-Feed Title: [Your compelling 80-character headline]
-Description: [Concise overview of main development]
-Core Message: [Comprehensive summary covering all major points, context, implications from the entire article and Remove citation brackets like [1], [2], [3] from text.]
-Key Tags: [keyword1, keyword2, keyword3, keyword4, keyword5]
-Sector: [Selected primary technology sector]
-Published Date: {published}
+## Analysis Request
+Please analyze this technology news article and provide:
 
-## Article to Analyze:
-{url}
+1. **Feed Title**: Create a compelling 80-character headline
+2. **Description**: Concise overview of the main development
+3. **Core Message**: Comprehensive summary covering all major points and implications
+4. **Key Tags**: 5 relevant keywords
+5. **Sector**: Primary technology sector
+
+Format your response as clear text, not JSON.
 """
 
 def build_prompt(url: str, published: str) -> str:
-    return TEMPLATE.format(system=SYSTEM_INSTR, published=published, url=url)
+    return TEMPLATE.format(published=published, url=url)
 
-# ---- OpenRouter ----------------------------------------------------------------
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
-MODEL = os.getenv("OPENROUTER_MODEL", "perplexity/sonar-pro")
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-
+# Use Streamlit secrets instead of os.getenv
 def call_openrouter_api(prompt: str) -> dict:
-    if API_KEY is None:
-        return {"ok": False, "error": "OPENROUTER_API_KEY is missing in secrets.toml"}
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_INSTR},
-            {"role": "user", "content": prompt},
-        ],
-    }
     try:
-        resp = requests.post(BASE_URL, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
-        return {"ok": True, "response": resp.json()}
+        # Get credentials from Streamlit secrets
+        api_key = st.secrets["OPENROUTER_API_KEY"]
+        base_url = st.secrets.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
+        model = st.secrets.get("OPENROUTER_MODEL", "perplexity/sonar-pro")
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_INSTR},
+                {"role": "user", "content": prompt},
+            ],
+            "max_tokens": 1500,
+            "temperature": 0.3
+        }
+        
+        response = requests.post(base_url, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        # Safe JSON parsing
+        try:
+            json_data = response.json()
+            # Extract the actual content
+            content = json_data['choices'][0]['message']['content']
+            return {"ok": True, "response": content}
+        except (KeyError, IndexError) as e:
+            return {"ok": False, "error": f"Invalid API response structure: {str(e)}"}
+        except ValueError as e:
+            return {"ok": False, "error": f"JSON parsing failed: {str(e)}. Raw response: {response.text[:200]}"}
+            
     except Exception as e:
-        return {"ok": False, "error": str(e)}
-# ---- End of OpenRouter ---------------------------------------------------------
+        return {"ok": False, "error": f"API call failed: {str(e)}"}
