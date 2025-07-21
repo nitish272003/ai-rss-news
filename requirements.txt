@@ -1,4 +1,5 @@
 streamlit
 feedparser
-pandas
 requests
+pandas
+python-dotenv
